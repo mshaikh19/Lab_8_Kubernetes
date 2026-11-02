@@ -1,0 +1,127 @@
+# ================================================================
+#   - Lab 7 Docker Compose
+#  API Gateway + 3 Microservices + 3 MongoDB containers
+#
+#  Key Lab 7 changes vs Lab 6:
+#  - api-gateway service added (port 3000 exposed externally)
+#  - User, Product, Order ports NO LONGER exposed to host
+#    (only reachable via the Docker network / gateway)
+#  - Service URLs injected into gateway as env vars
+#    (configuration-based service discovery – Part B)
+#  - For cloud deployment: replace MONGO_URI values with
+#    your MongoDB Atlas connection strings and remove the
+#    local *-db services.
+# ================================================================
+
+services:
+
+  # ── API Gateway ───────────────────────────────────────────────
+  # Single externally-reachable entry point.
+  # Service locations come from env vars (service registry).
+  api-gateway:
+    build: ./api-gateway
+    container_name: api-gateway
+    image: api-gateway:v1
+    ports:
+      - "3000:3000"        # ← ONLY this port is exposed to the host
+    environment:
+      - GATEWAY_PORT=3000
+      # ── Service Registry (Part B) ──────────────────────────
+      # Change a service URL here (no code edit needed) to
+      # re-point the gateway to a different host/port.
+      - USER_SERVICE_URL=http://user-service:3001
+      - PRODUCT_SERVICE_URL=http://product-service:3002
+      - ORDER_SERVICE_URL=http://order-service:3003
+    depends_on:
+      - user-service
+      - product-service
+      - order-service
+    networks:
+      - campus-network
+    restart: unless-stopped
+
+  # ── User Service ──────────────────────────────────────────────
+  # No host port exposed → accessible only via gateway or
+  # other containers on campus-network.
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    image: user-service:v1
+    # ports section intentionally omitted (internal only)
+    environment:
+      - USER_SERVICE_PORT=3001
+      - MONGO_URI=mongodb://user-db:27017/userdb
+      # For Atlas: MONGO_URI=mongodb+srv://<user>:<pass>@<cluster>/userdb
+    depends_on:
+      - user-db
+    networks:
+      - campus-network
+    restart: unless-stopped
+
+  # ── Product Service ───────────────────────────────────────────
+  product-service:
+    build: ./product-service
+    container_name: product-service
+    image: product-service:v1
+    environment:
+      - PRODUCT_SERVICE_PORT=3002
+      - MONGO_URI=mongodb://product-db:27017/productdb
+    depends_on:
+      - product-db
+    networks:
+      - campus-network
+    restart: unless-stopped
+
+  # ── Order Service ─────────────────────────────────────────────
+  order-service:
+    build: ./order-service
+    container_name: order-service
+    image: order-service:v1
+    environment:
+      - ORDER_SERVICE_PORT=3003
+      # Order Service calls User & Product services directly
+      # (inter-service, not via gateway)
+      - USER_SERVICE_URL=http://user-service:3001
+      - PRODUCT_SERVICE_URL=http://product-service:3002
+      - MONGO_URI=mongodb://order-db:27017/orderdb
+    depends_on:
+      - user-service
+      - product-service
+      - order-db
+    networks:
+      - campus-network
+    restart: unless-stopped
+
+  # ── Databases ─────────────────────────────────────────────────
+  user-db:
+    image: mongo:7.0
+    container_name: user-db
+    volumes:
+      - user-mongo-data:/data/db
+    networks:
+      - campus-network
+
+  product-db:
+    image: mongo:7.0
+    container_name: product-db
+    volumes:
+      - product-mongo-data:/data/db
+    networks:
+      - campus-network
+
+  order-db:
+    image: mongo:7.0
+    container_name: order-db
+    volumes:
+      - order-mongo-data:/data/db
+    networks:
+      - campus-network
+
+volumes:
+  user-mongo-data:
+  product-mongo-data:
+  order-mongo-data:
+
+networks:
+  campus-network:
+    driver: bridge
